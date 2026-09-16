@@ -1,0 +1,65 @@
+version: 2
+
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '06:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 8
+    versioning-strategy: 'increase-if-necessary'
+    labels:
+      - 'dependencies'
+      - 'module/ops'
+    commit-message:
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
+      include: 'scope'
+    groups:
+      next-react:
+        patterns:
+          - 'next'
+          - 'next-*'
+          - 'react'
+          - 'react-dom'
+          - '@types/react'
+          - '@types/react-dom'
+      stellar:
+        patterns:
+          - '@stellar/*'
+      tooling:
+        patterns:
+          - 'eslint'
+          - 'eslint-*'
+          - '@typescript-eslint/*'
+          - 'prettier'
+          - 'typescript'
+          - 'vitest'
+          - '@vitest/*'
+          - '@testing-library/*'
+          - 'msw'
+      types:
+        patterns:
+          - '@types/*'
+    ignore:
+      # Allow lock-step manual bumps on Tailwind v4; it is under active change.
+      - dependency-name: 'tailwindcss'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 5
+    labels:
+      - 'dependencies'
+      - 'module/ops'
+    commit-message:
+      prefix: 'ci(deps)'
+
+  # NOTE: A 'cargo' ecosystem for '/contracts' (Soroban crates) was removed.
+  # Dependabot errors ("Cargo.toml not found"), not silently skips, when the
+  # manifest is absent. Re-add this block once /contracts/Cargo.toml exists.

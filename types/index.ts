@@ -1,0 +1,434 @@
+// ─── Anchors ─────────────────────────────────────────────────────────────────
+
+/** A Stellar anchor that supports SEP-24 withdrawals and/or deposits. */
+export interface Anchor {
+  id: string;
+  name: string;
+  homeDomain: string;
+  corridors: string[]; // corridor IDs this anchor serves
+  assetCode: string;
+  assetIssuer: string;
+}
+
+/** A payment corridor from one asset to a fiat currency in a given country. */
+export interface Corridor {
+  id: string; // e.g. 'usdc-ngn'
+  from: string; // asset code, e.g. 'USDC'
+  to: string; // fiat currency code, e.g. 'NGN'
+  countryCode: string; // ISO 3166-1 alpha-2
+  countryName: string;
+}
+
+// ─── Rate comparison ──────────────────────────────────────────────────────────
+
+/** The fee structure an anchor charges for a given corridor and amount. */
+export interface AnchorRate {
+  anchorId: string;
+  anchorName: string;
+  corridorId: string;
+  fee: number | null; // flat fee in USDC; null when anchor is unreachable
+  feeType: 'flat' | 'percent' | 'combined';
+  exchangeRate: number | null; // local currency units per 1 USDC; null when anchor is unreachable
+  totalReceived: number | null; // computed: (amount - fee) * exchangeRate; null when anchor is unreachable
+  updatedAt: Date;
+  /** Discriminates the origin of the rate data. */
+  source: 'sep38' | 'sep24-fee' | 'unavailable';
+  /** Row-level quote lifecycle state. Only meaningful for source === 'sep38'. */
+  quoteStatus?: 'firm' | 'expiring' | 'refreshing';
+}
+
+/** The result of comparing all anchor rates for a single corridor. */
+export interface RateComparison {
+  corridorId: string;
+  rates: AnchorRate[];
+  bestRateId: string; // anchorId of the anchor with the highest totalReceived
+}
+
+// ─── Wallet ───────────────────────────────────────────────────────────────────
+
+/** The current state of the Freighter browser extension. */
+export interface FreighterState {
+  isInstalled: boolean;
+  isConnected: boolean;
+  publicKey: string | null;
+  network: string | null;
+  error: string | null;
+}
+
+// ─── SEP-1 ────────────────────────────────────────────────────────────────────
+
+/** Per-anchor protocol capability flags derived from the resolved TOML. */
+export interface AnchorCapabilities {
+  sep10: boolean;
+  sep24: boolean;
+  sep38: boolean;
+  sep12: boolean;
+}
+
+/** Relevant fields from a stellar.toml file resolved via SEP-1. */
+export interface Sep1TomlData {
+  domain: string;
+  TRANSFER_SERVER_SEP0024: string | null;
+  ANCHOR_QUOTE_SERVER: string | null;
+  WEB_AUTH_ENDPOINT: string | null;
+  SIGNING_KEY: string | null;
+  NETWORK_PASSPHRASE: string | null;
+  /** SEP-1 [DOCUMENTATION]: organization website (https). */
+  ORG_URL: string | null;
+  /** SEP-1 [DOCUMENTATION]: user support email. */
+  ORG_SUPPORT_EMAIL: string | null;
+  /** Optional non-standard support page URL some anchors publish. */
+  ORG_SUPPORT_URL: string | null;
+  CURRENCIES: Array<{ code: string; issuer?: string }>;
+  capabilities: AnchorCapabilities;
+}
+
+/** A normalized stellar.toml response for an anchor resolved via SEP-1. */
+export type ResolvedAnchorToml = Sep1TomlData;
+
+/** A resolved anchor with protocol capabilities attached. */
+export type ResolvedAnchor = Anchor & Sep1TomlData;
+
+// ─── SEP-38 ───────────────────────────────────────────────────────────────────
+
+/** A delivery method offered for buying or selling an off-chain SEP-38 asset. */
+export interface Sep38DeliveryMethod {
+  name: string;
+  description: string;
+}
+
+/** A single asset entry from the SEP-38 GET /info response. */
+export interface Sep38Asset {
+  /** SEP-38 asset identifier, e.g. "stellar:USDC:GA5..." or "iso4217:BRL". */
+  asset: string;
+  /** Methods for selling (delivering) the asset to the anchor. Empty for on-chain assets. */
+  sellDeliveryMethods: Sep38DeliveryMethod[];
+  /** Methods for buying (receiving) the asset from the anchor. Empty for on-chain assets. */
+  buyDeliveryMethods: Sep38DeliveryMethod[];
+  /** ISO 3166-1 alpha-3 country codes the asset is available in. */
+  countryCodes: string[];
+}
+
+/** Parsed SEP-38 GET /info response: supported assets and their delivery methods. */
+export interface Sep38Info {
+  assets: Sep38Asset[];
+}
+
+/** Request parameters for the SEP-38 GET /prices indicative price feed. */
+export interface Sep38PricesParams {
+  sell_asset: string;
+  sell_amount: string;
+  sell_delivery_method?: string;
+  buy_delivery_method?: string;
+  country_code?: string;
+}
+
+/** A single indicative buy option from the SEP-38 GET /prices response. */
+export interface Sep38IndicativePrice {
+  /** The SEP-38 identifier of the asset that can be bought (raw `asset` field). */
+  asset: string;
+  /** Alias of `asset`: the asset the user would buy with the sell asset. */
+  buy_asset: string;
+  /** Indicative unit price of buy_asset in terms of sell_asset, as a decimal string. */
+  price: string;
+  /** Indicative total price for the requested sell_amount, including fees. */
+  total_price: string;
+}
+
+/** The downstream protocol a SEP-38 firm quote will be used with. */
+export type Sep38QuoteContext = 'sep6' | 'sep24' | 'sep31';
+
+/** Request parameters for SEP-38 POST /quote (firm quote creation). */
+export interface Sep38QuoteParams {
+  sell_asset: string;
+  buy_asset: string;
+  sell_amount: string;
+  context: Sep38QuoteContext;
+  buy_delivery_method?: string;
+  sell_delivery_method?: string;
+  country_code?: string;
+  /** RFC 3339 timestamp; the quote must remain valid until at least this time. */
+  expire_after?: string;
+}
+
+/** A firm SEP-38 quote returned by POST /quote. */
+export interface Sep38Quote {
+  id: string;
+  /** RFC 3339 timestamp after which the quote is no longer honored. */
+  expires_at: string;
+  price: string;
+  sell_amount: string;
+  buy_amount: string;
+}
+
+// ─── SEP-10 ───────────────────────────────────────────────────────────────────
+
+/** A JWT issued by an anchor after successful SEP-10 authentication. */
+export interface Sep10Auth {
+  jwt: string;
+  anchorDomain: string;
+  publicKey: string;
+  expiresAt: Date;
+}
+
+// ─── SEP-24 ───────────────────────────────────────────────────────────────────
+
+/** Parameters for the SEP-24 GET /fee endpoint. */
+export interface Sep24FeeParams {
+  anchorDomain: string;
+  operation: 'deposit' | 'withdraw';
+  assetCode: string;
+  assetIssuer: string;
+  amount: string;
+  type: 'bank_account' | 'cash' | 'mobile_money';
+}
+
+/** Body sent to POST /transactions/withdraw/interactive. */
+export interface Sep24WithdrawRequest {
+  assetCode: string;
+  assetIssuer: string;
+  amount: string;
+  account: string; // user's Stellar public key
+  jwt: string;
+}
+
+/** Response from POST /transactions/withdraw/interactive. */
+export interface Sep24WithdrawResponse {
+  type: 'interactive_customer_info_needed';
+  url: string;
+  id: string;
+}
+
+/** All possible raw status strings an anchor may return for a SEP-24 transaction. */
+export type WithdrawStatusValue =
+  | 'incomplete'
+  | 'pending_user_transfer_start'
+  | 'pending_user_transfer_complete'
+  | 'pending_external'
+  | 'pending_anchor'
+  | 'pending_stellar'
+  | 'pending_trust'
+  | 'pending_user'
+  | 'completed'
+  | 'refunded'
+  | 'error'
+  | 'no_market'
+  | 'too_small'
+  | 'too_large'
+  | 'expired';
+
+/**
+ * Canonical app-wide status enum.
+ * Raw anchor strings (WithdrawStatusValue) are mapped to this via sep24-status-map.ts.
+ */
+export type WithdrawStatus =
+  | 'pending_user_action'
+  | 'pending_anchor'
+  | 'pending_stellar'
+  | 'pending_external'
+  | 'completed'
+  | 'no_market'
+  | 'refunded'
+  | 'expired'
+  | 'error';
+
+/** Payment breakdown for a refunded SEP-24 transaction. */
+export interface Sep24RefundPayment {
+  id: string;
+  id_type: string;
+  amount: string;
+  fee: string;
+}
+
+/** Refund details for a SEP-24 transaction. */
+export interface Sep24Refunds {
+  amount_refunded: string;
+  amount_fee: string;
+  payments: Sep24RefundPayment[];
+}
+
+/** The live record of a SEP-24 withdrawal transaction returned by the anchor. */
+export interface Sep24Transaction {
+  id: string;
+  status: WithdrawStatusValue;
+  amountIn?: string | undefined;
+  amountInAsset?: string | undefined;
+  amountOut?: string | undefined;
+  amountOutAsset?: string | undefined;
+  amountFee?: string | undefined;
+  updatedAt: Date;
+  stellarTransactionId?: string | undefined;
+  externalTransactionId?: string | undefined;
+  refunds?: Sep24Refunds | undefined;
+}
+
+// ─── Post-execute handoff ─────────────────────────────────────────────────────
+
+/** Data passed from ExecuteDrawer to the page after a successful withdrawal initiation. */
+export interface WithdrawHandoffPayload {
+  transactionId: string;
+  transferServer: string;
+  jwt: string;
+}
+
+// ─── Intent schema ────────────────────────────────────────────────────────────
+
+/** Delivery method preference for fiat payout. */
+export type DeliveryHint = 'bank_account' | 'cash' | 'mobile_money';
+
+/** User preferences for routing and execution. */
+export interface IntentPreferences {
+  allowSplit?: boolean; // whether to allow multi-anchor splits
+  maxAnchors?: number; // maximum number of anchors to use (default: 1 for MVP)
+  preferAnchorIds?: string[]; // optional anchor whitelist
+}
+
+/** The user's signed statement of purpose for off-ramp withdrawal. */
+export interface Intent {
+  version: 1;
+  nonce: string; // 128-bit random, replay protection
+  account: string; // user's Stellar public key
+  corridor: string; // e.g. 'usdc-ngn'
+  sellAsset: { code: string; issuer: string }; // e.g. USDC
+  sellAmount: string; // decimal string in send asset
+  buyAsset: { code: string }; // fiat currency code, e.g. 'NGN'
+  minReceive: string; // floor on delivered amount (decimal string)
+  deliveryHint: DeliveryHint; // preferred delivery method
+  deadline: string; // RFC3339, e.g. 2026-05-23T19:00:00Z
+  preferences?: IntentPreferences;
+}
+
+/** A signed intent with hash and cryptographic signature. */
+export interface SignedIntent {
+  intent: Intent;
+  intentHash: string; // sha-256 hex over canonical JSON
+  signature: string; // ed25519 hex signature over intentHash
+}
+
+// ─── SEP-38 Quote ──────────────────────────────────────────────────────────────
+
+/** A firm SEP-38 quote from an anchor. Maps to POST /sep38/quote response. */
+export interface Sep38Quote {
+  id: string; // Unique quote identifier
+  price: string; // exchange rate: local currency units per 1 sell_asset
+  total_price: string; // effective price after fees
+  sell_amount: string; // exact amount in sell_asset (may differ from request)
+  buy_amount: string; // exact amount in buy_asset
+  fee: {
+    total: string; // total fee in sell_asset
+    percent: string; // fee as percentage
+  };
+  expires_at: string; // RFC3339 expiry timestamp
+  context: 'sep24'; // context used in the quote request
+}
+
+/** An evaluated SEP-38 quote with eligibility and score information. */
+export interface EvaluatedQuote extends Sep38Quote {
+  anchorId: string;
+  anchorName: string;
+  meetsFloor: boolean; // whether buyAmount >= intent.minReceive
+  expiredAt: Date; // parsed expires_at
+  isExpired: boolean; // whether quote has expired
+  netAmount: string; // buy amount (for clarity in solver output)
+}
+
+// ─── Router Plan ───────────────────────────────────────────────────────────────
+
+/** A single-anchor execution plan: which anchor to use and the firm quote. */
+export interface Plan {
+  type: 'single_anchor';
+  anchorId: string;
+  anchorName: string;
+  quoteId: string; // SEP-38 quote ID to pass to /transactions/withdraw/interactive
+  netAmount: string; // amount user will receive in buy_asset
+  fee: string; // fee amount in sell_asset
+  price: string; // exchange rate used
+}
+
+/** Result of the solver: either a plan to execute or a typed error. */
+export type SolverResult = 
+  | { ok: true; plan: Plan }
+  | { ok: false; error: 'no_eligible_route' }
+  | { ok: false; error: 'floor_not_met'; details: string }
+  | { ok: false; error: 'all_quotes_expired'; details: string };
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+
+/** Shape returned by GET /api/rates. */
+export interface ApiRatesResponse {
+  rates: RateComparison;
+  fetchedAt: string;
+}
+
+/** Shape returned by API routes on error. */
+export interface ApiError {
+  code: string;
+  message: string;
+  anchorId?: string;
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+
+/** A country supported by the off-ramp module. */
+export interface Country {
+  code: string; // ISO 3166-1 alpha-2
+  name: string;
+  currency: string; // ISO 4217
+  currencySymbol: string;
+  flag: string;
+}
+
+export type OfframpSortKey = 'rate' | 'fee' | 'time' | 'total';
+export type SortDirection = 'asc' | 'desc';
+export type RiskLevel = 'low' | 'medium' | 'high';
+
+// ─── ExecuteDrawer state machine ─────────────────────────────────────────────
+
+/** Steps in the ExecuteDrawer off-ramp flow state machine. */
+export type ExecuteDrawerStep =
+  | 'idle'
+  | 'authenticating'
+  | 'initiating'
+  | 'kyc'
+  | 'building'
+  | 'signing'
+  | 'done'
+  | 'error';
+
+// ─── Stellar assets (used by Horizon swap routing) ────────────────────────────
+
+export interface StellarAsset {
+  code: string;
+  issuer?: string;
+  name: string;
+  logoUrl?: string;
+}
+
+export interface SwapRoute {
+  routeId: string;
+  source: 'SDEX' | 'Soroswap' | 'Phoenix' | 'Aquarius';
+  fromAsset: StellarAsset;
+  toAsset: StellarAsset;
+  fromAmount: number;
+  toAmount: number;
+  price: number;
+  priceImpact: number;
+  fee: number;
+  path: StellarAsset[];
+  estimatedTime: string;
+  lastUpdated: Date;
+}
+
+// ─── KYC iframe ────────────────────────────────────────────────────────────────
+
+/** PostMessage data structure for KYC iframe communication */
+export interface KycPostMessage {
+  type: 'stellar_transaction_created' | 'stellar_cancel';
+  transaction_id?: string;
+}
+
+/** Configuration for KYC iframe component */
+export interface KycIframeConfig {
+  url: string;
+  origin: string;
+}

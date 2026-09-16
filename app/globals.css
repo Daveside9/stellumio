@@ -1,0 +1,56 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary-text: var(--primary-text);
+  --color-secondary-text: var(--secondary-text);
+  --color-background: var(--background);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+}
+
+:root {
+  --primary-text: #000000;
+  --secondary-text: #6b7280;
+  --background: #ffffff;
+  --bg-subtle: #f9fafb;
+  --border: #e2e8f0;
+  --accent: #2563eb;
+}
+
+.dark {
+  --primary-text: #ffffff;
+  --secondary-text: #9ca3af;
+  --background: #000000;
+  --bg-subtle: #111827;
+  --border: #1e293b;
+  --accent: #2563eb;
+}
+
+/* Mobile bottom sheet -------------------------------------------------------- */
+/* Below the `sm` breakpoint the execute drawer is a bottom sheet with
+   swipe-to-dismiss. JS touch handlers feed a live translateY offset; this CSS
+   owns the snap-back animation, the safe-area padding (so content clears the
+   iOS home indicator), and disabling the transition while actively dragging so
+   the sheet tracks the finger 1:1. Scoped to phones so the desktop side panel
+   is untouched. */
+@media (max-width: 639px) {
+  .bottom-sheet {
+    padding-bottom: env(safe-area-inset-bottom);
+    transition: transform 0.3s ease;
+  }
+
+  /* While the user is dragging, kill the transition so movement is immediate. */
+  .bottom-sheet[data-dragging='true'] {
+    transition: none;
+  }
+
+  /* The grab handle owns the gesture; opt it out of native scrolling so a
+     downward drag dismisses instead of trying to scroll the page. */
+  .bottom-sheet-handle {
+    touch-action: none;
+    cursor: grab;
+  }
+}
